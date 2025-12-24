@@ -1,0 +1,134 @@
+{
+  "name": "Q2 - Gemini AI Multi-Function Automation",
+  "description": "n8n workflow supporting summarization, translation, AI replies, and note organization with persistent webhook execution",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "q2-process",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ],
+      "id": "webhook-node-id"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 根據 action 類型構建不同的 prompt\nconst text = $json.body.text;\nconst action = $json.body.action || 'summarize';\nconst language = $json.body.target_language || 'Traditional Chinese';\n\nlet prompt = '';\n\nswitch(action) {\n  case 'translate':\n    prompt = `請將以下文本翻譯成${language}，只回覆翻譯結果，不要有任何其他說明：\\n\\n${text}`;\n    break;\n  case 'reply':\n    prompt = `請基於以下內容生成專業且有幫助的回覆：\\n\\n${text}`;\n    break;\n  case 'note':\n    prompt = `請將以下文本整理成結構化的筆記，包含主要要點、次要細節和關鍵結論:\\n\\n${text}`;\n    break;\n  case 'summarize':\n  default:\n    prompt = `請用中文將以下文本摘要為 3-5 個核心要點，每個要點用 • 開頭，簡潔清楚：\\n\\n${text}`;\n    break;\n}\n\nreturn [{\n  prompt: prompt,\n  action: action,\n  text: text,\n  language: language\n}];"
+      },
+      "name": "Build Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        300
+      ],
+      "id": "build-prompt-node-id"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=AIzaSyC5wcVCan4UUyx-ThSpOSlLXEMYQTJ16eo",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"contents\": [{ \"parts\": [{ \"text\": $json.prompt }] }] } }}",
+        "options": {
+          "response": {
+            "response": "full"
+          }
+        }
+      },
+      "name": "Call Gemini API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        700,
+        300
+      ],
+      "id": "gemini-api-node-id"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 解析 Gemini API 回應\ntry {\n  const response = $json;\n  const apiResponse = response.body || response;\n  \n  // 檢查是否有錯誤\n  if (apiResponse.error) {\n    return [{\n      success: false,\n      result: 'API Error',\n      error: apiResponse.error.message,\n      action: $node[\"Build Prompt\"].json.action\n    }];\n  }\n  \n  // 提取文本結果\n  if (apiResponse.candidates && apiResponse.candidates.length > 0) {\n    const candidate = apiResponse.candidates[0];\n    if (candidate.content && candidate.content.parts && candidate.content.parts.length > 0) {\n      const result = candidate.content.parts[0].text;\n      return [{\n        success: true,\n        result: result,\n        action: $node[\"Build Prompt\"].json.action,\n        timestamp: new Date().toISOString()\n      }];\n    }\n  }\n  \n  return [{\n    success: false,\n    result: 'No valid response',\n    error: 'Invalid API response structure',\n    action: $node[\"Build Prompt\"].json.action\n  }];\n} catch (error) {\n  return [{\n    success: false,\n    result: 'Error processing response',\n    error: error.message,\n    action: $node[\"Build Prompt\"].json.action\n  }];\n}"
+      },
+      "name": "Parse Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        950,
+        300
+      ],
+      "id": "parse-response-node-id"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "name": "Return Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        300
+      ],
+      "id": "return-response-node-id"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Build Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Prompt": {
+      "main": [
+        [
+          {
+            "node": "Call Gemini API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Gemini API": {
+      "main": [
+        [
+          {
+            "node": "Parse Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Response": {
+      "main": [
+        [
+          {
+            "node": "Return Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
